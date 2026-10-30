@@ -1,0 +1,88 @@
+rules_version = '2';
+
+// Access model
+//  - Only signed-in, email-verified ALU accounts can read or write anything.
+//  - Everyone starts as `student`; only an admin (console / Admin SDK) can
+//    set role = 'staff'. Users can never change their own role.
+//  - Students create reports and may edit/withdraw them while `submitted`.
+//  - Staff may change status (+ audit trail) and delete any report.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+
+    function isAluVerified() {
+      return signedIn()
+        && request.auth.token.email_verified == true
+        && request.auth.token.email.matches('.*@(alustudent|alueducation)[.]com$');
+    }
+
+    function isStaff() {
+      return isAluVerified()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'staff';
+    }
+
+    function changedOnly(fields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
+    }
+
+    function validCategory(c) {
+      return c in ['facilities', 'water', 'electricity', 'furniture', 'sanitation', 'safety', 'other'];
+    }
+
+    function validStatus(s) {
+      return s in ['submitted', 'inProgress', 'resolved', 'rejected'];
+    }
+
+    function validReportFields(d) {
+      return d.title is string && d.title.size() >= 5 && d.title.size() <= 80
+        && d.description is string && d.description.size() >= 15 && d.description.size() <= 1000
+        && d.location is string && d.location.size() > 0 && d.location.size() <= 120
+        && validCategory(d.category);
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isStaff());
+
+      // Profile is created right after sign-up, before email verification.
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.role == 'student'
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.keys().hasOnly(['fullName', 'email', 'role', 'createdAt']);
+
+      allow update: if request.auth.uid == uid && changedOnly(['fullName']);
+      allow delete: if false;
+    }
+
+    match /incidents/{incidentId} {
+      // Campus feed is visible to all verified users to reduce duplicates.
+      allow read: if isAluVerified();
+
+      allow create: if isAluVerified()
+        && request.resource.data.reporterId == request.auth.uid
+        && request.resource.data.status == 'submitted'
+        && request.resource.data.createdAt == request.time
+        && validReportFields(request.resource.data);
+
+      // Reporter edits content while the report is still untouched by staff.
+      allow update: if isAluVerified()
+        && resource.data.reporterId == request.auth.uid
+        && resource.data.status == 'submitted'
+        && changedOnly(['title', 'description', 'category', 'location',
+                        'photoUrl', 'photoPath', 'updatedAt'])
+        && validReportFields(request.resource.data);
+
+      // Staff move status forward and append to the audit trail only.
+      allow update: if isStaff()
+        && changedOnly(['status', 'updatedAt', 'history'])
+        && validStatus(request.resource.data.status)
+        && request.resource.data.history.size() == resource.data.history.size() + 1;
+
+      allow delete: if isStaff()
+        || (isAluVerified()
+            && resource.data.reporterId == request.auth.uid
+            && resource.data.status == 'submitted');
+    }
+  }
+}

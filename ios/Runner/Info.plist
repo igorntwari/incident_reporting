@@ -6,8 +6,12 @@
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Take a photo of the campus issue you are reporting.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Attach an existing photo of the campus issue you are reporting.</string>
 	<key>CFBundleDisplayName</key>
-	<string>Incident Reporting</string>
+	<string>Campus Fix</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

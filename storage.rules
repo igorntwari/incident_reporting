@@ -1,0 +1,28 @@
+rules_version = '2';
+
+// Photos live at incident_photos/{uid}/{incidentId}.jpg.
+// Users may only write into their own folder; files must be images < 5 MB.
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isAluVerified() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email.matches('.*@(alustudent|alueducation)[.]com$');
+    }
+
+    function isStaff() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'staff';
+    }
+
+    match /incident_photos/{uid}/{fileName} {
+      allow read: if isAluVerified();
+
+      allow write: if isAluVerified()
+        && request.auth.uid == uid
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+
+      allow delete: if isAluVerified() && (request.auth.uid == uid || isStaff());
+    }
+  }
+}
